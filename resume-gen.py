@@ -1,105 +1,169 @@
-import os
+import streamlit as st 
+import os 
 import time
 import langchain
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
+from tavily import TavilyClient
 import pytesseract as pyt
 import numpy as np
-from langchain.messages import SystemMessage , HumanMessage
+from langchain.messages import SystemMessage, HumanMessage
 from langchain.agents import create_agent
 import streamlit as st
+from PIL import Image
+import base64
+st.set_page_config(layout="wide")
 
+#==============ForntEnd==============
+st.title("AI Resume Maker & Job Apply Link")
+st.image("airesumeagent.jpeg")
 
-st.title("AI RESUME GENERATOR")
+GOOGLE_API_KEY =st.sidebar.text_input("Google API Key",type='password')
+GROQ_API_KEY =st.sidebar.text_input("GROQ API Key",type='password')
+TAVILY_API_KEY =st.sidebar.text_input("TAVILY API Key",type='password')
 
-TAVILY_KEY = st.sidebar.text_input("Tavily API Key" , type = "password")
-GROQ_KEY = st.sidebar.text_input("Groq API Key" , type = "password")
-GEMINI_KEY = st.sidebar.text_input("Google API Key" , type = "password")
+if not (GOOGLE_API_KEY) and not (GROQ_API_KEY) and not (TAVILY_API_KEY) :
+    st.sidebar.warning("pass api keys")
+    st.stop()
+else:
+    st.success("Api Keys Loaded")
 
-if not GEMINI_KEY :
-  st.warning("Provide Google API Key")
-
-
+#==============MODEL AND AGENT CODE==============
 # tool 1
-from tavily import TavilyClient
-client = TavilyClient(TAVILY_KEY)
-def news(query) :
-    """this function helps to get latest news
-    or latest jobs related to
-    the given query using tavily"""
+def search_latest_news_jobs(query):
+    """This function helps to get 
+    latest news or latest jobs 
+    related to user given query 
+    using tavily"""
+    
+    from tavily import TavilyClient
+    client = TavilyClient(api_key = TAVILY_API_KEY)
+    return client.search(query)
 
-    return client.search(
-        query=query,
-        topic="news",
-        max_results=5
-    )["results"]
-
-# step 1 : Model Creation
-model = ChatGoogleGenerativeAI(
-    model="gemini-3.5-flash-lite",
-    google_api_key=GEMINI_KEY
+# Step : Model and Agent creation
+model1 = ChatGoogleGenerativeAI(
+    model = "gemini-3.5-flash-lite",
+    google_api_key = GOOGLE_API_KEY
 )
 
 model2 = ChatGroq(
     model = "qwen/qwen3.6-27b",
-    api_key = GROQ_KEY
+    api_key = GROQ_API_KEY
 )
 
+#===========Agent with tool===========
 agent = create_agent(
-    model = model,
-    tools = [news]
+    model = model1,   # can be model2 also,
+    tools = [search_latest_news_jobs]
 )
 
-# lets generate prompt for llm for resume building
-
+# Let's Generate Prompt for Resume using model
 def prompt_generator():
- prompt = """You are a helpful ai resume maker,
- i want you to use chain_of_thoughts and give detailed prompt for model
- to where user want to generate resume for
- freshers or expirienced one in the html format ,
- you have to give prompt set of instructions and
- make sure to keep design professsional"""
+    prompt = """You are a helpful AI Resume 
+    maker, I want you to use chain-of-thoughts 
+    and give detailed prompt for model 
+    where user want to generate resume 
+    for fresher or experienced one 
+    in HTML format, you have to give proper 
+    set of instructions, and make sure to keep 
+    design professional"""
 
- response = model.invoke(prompt)
- prompt = response.content[0]['text']
- filename = "prompt.txt"
- with open(filename, 'w') as f:
-  f.write(prompt)
+    response = model1.invoke(prompt)
+    prompt_ans = response.content[-1]['text']
+    # print(prompt_ans)
 
+    file_name = 'prompt.txt'
+    with open(file_name, 'w') as f:
+        f.write(prompt_ans)
 prompt_generator()
 
+# Final_Agent
+#Tool 2
+def prompt_reader():
+    with open('prompt.txt','r') as f:
+        prompt = f.read()
+    return prompt
 
-def prompt_reader() :
-  with open("prompt.txt","r") as f:
-    prompt = f.read()
-  return prompt
+prompt = """you are a helpful ai assistant  with a job resume maker , your task is to give html gormat resume ,
+with a proper designing using recent html js css code , with professional degsine format , 
+user will upload data and return html format resume make it diffrent colour scheme and 
+the resume should project m skill set  also make it look like professional , 
+create side margins table also make the text gradient for heddings like professional summary
+IMPORTANT: wherever the profile photo goes in the resume, output exactly this tag and nothing else:
+<img src="PROFILE_IMAGE_PLACEHOLDER" style="width:100px;height:100px;border-radius:50%;">
+do not draw or generate any other image tag or placeholder circle yourself"""
 
-prompt = """ I want complete professional resume with dynamic
-Design using advance css and js and must show user input details
-System instuctions : Give only html code as output"""
+final_prompt = prompt + prompt_reader()
+#===============================upload_image=========================
+FILE = st.sidebar.file_uploader(
+    "choose an image file",
+    type= ["jpg","jpeg","png","webp"]
+)
 
-main_prompt = prompt + prompt_reader()
+if FILE is not None:
+    try:
+        image = Image.open(FILE)
+        st.sidebar.image(image,caption = "Uploaded Image",use_container_width=True)
+        if image.mode in ("RGBA","P"):
+            image = image.convert("RGB")
+            
+        base_name  = os.path.splitext(FILE.name)[0]
+        save_path = f"{base_name}.jpg"
+        
+        image.save(save_path,"JPEG")
+        st.sidebar.success(f"Image successfully saved as `{save_path}`!")
 
-user_info = st.text_input("Give your info")
-user_pic = st.sidebar.file_uploader("Upload photo",type = "image/jpeg")
-
-user_prompt = f"""
-  user details = {user_info}
-  use profile pic from given image {user_pic}
-"""
-
-final_prompt = main_prompt + user_prompt
-
-if st.button("Generate Resume") : 
-  with st.spinner("Agent creating resume...") :
-    response = agent.invoke({'messages' : [{'role' : 'user' , 'content' : final_prompt}]})
-    code = response['messages'][-1].content[-1]['text']
-    st.html(code, width="stretch", unsafe_allow_javascript=True)
-
-
-
+    except Exception as e:
+         st.error(f"Error proccessing image:{e}")
 
 
+            
+# Change this when required new resume by user, pass details
+
+user_info = st.text_area("Give Your Information : ")
+user_query = f"""user details:given below:
+    resume info : {user_info}
+    Default if not given:PYTHON DEVELOPER RESUME"""
+
+final_query = final_prompt + user_query
+
+OPTIONS = ["DELHI","NOIDA","GURGAON/GURUGRAM",
+          'KANPUR','LUCKNOW','BANGLORE','PUNE']
+           
+LOCATION = st.sidebar.multiselect('SELECT LOCATION: ',
+                                    options = OPTIONS )
+
+JOB_PROFILE = ["PYTHON DEVELOPER",'GEN AI',
+                'FULL-STACK DEVELOPER','DATA ANALYST']
+
+PROFILE = st.sidebar.multiselect("SELECT JOB ROLE",
+                options = JOB_PROFILE)
 
 
+job_prompt = f"""Based on {PROFILE} jobs in {LOCATION}, I 
+want latest job news in using tavily, 
+try top 10 search or whatever available
+and give result like naukri theme design with
+job name, job desc, salary,
+apply link and OUTPUT must be In HTML no markdowns"""
+
+if st.button("Generate Resume"):
+    with st.spinner("Agent Creating Resume..."):
+        response = agent.invoke({'messages':[{'role':'user',"content":final_query}]})
+        code = response['messages'][-1].content[-1]['text']
+
+        if FILE is not None:
+            with open(save_path,"rb") as img_file:
+                b64_image = base64.b64encode(img_file.read()).decode()
+            data_uri = f"data:image/jpeg;base64,{b64_image}"
+            code =  code.replace("PROFILE_IMAGE_PLACEHOLDER",data_uri)
+            
+        st.html(code,width="stretch",unsafe_allow_javascript=True)
+
+#=========================Apply Live Jobs===================================================================
+
+        st.divider()
+        response = agent.invoke({'messages':[{'role':'user',"content":job_prompt}]})
+        job_code = response['messages'][-1].content[-1]['text']
+        st.html(job_code,width="stretch",unsafe_allow_javascript=True)
