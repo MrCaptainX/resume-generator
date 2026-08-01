@@ -17,7 +17,6 @@ st.set_page_config(layout="wide")
 
 #==============ForntEnd==============
 st.title("AI Resume Maker & Job Apply Link")
-st.image("airesumeagent.jpeg")
 
 GOOGLE_API_KEY =st.sidebar.text_input("Google API Key",type='password')
 GROQ_API_KEY =st.sidebar.text_input("GROQ API Key",type='password')
